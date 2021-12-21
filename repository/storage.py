@@ -1,12 +1,15 @@
 from psycopg2 import connect
 from psycopg2.errors import ConnectionException
+from sqlalchemy.engine.url import URL
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 
 class Database:
 
+    url = None
     connection = None
-    cursor = None
-    borders = None
+    session = None
 
     def __init__(self, host: str, port: int, username: str, password: str, dbname: str):
         self.host = host
@@ -14,51 +17,34 @@ class Database:
         self.username = username
         self.password = password
         self.dbname = dbname
+    
+    def _create_URL_for_connection(self) -> str:
+        self.url = URL(drivername = 'postgresql',
+        username = self.username, 
+        password=self.password,
+        host = self.host,
+        port = self.port,
+        database = self.dbname)
+        return self.url
 
     def connect_database(self):
         try:
-            connection = connect(
-            host = self.host,
-            port = self.port,
-            user = self.username,
-            password = self.password,
-            dbname = self.dbname
-            )
+            connection = create_engine(self._create_URL_for_connection())
 
         except ConnectionError as e:
             raise ConnectionException("Trying to connect to PostgreSQL aborted.")
         finally:
             self.connection = connection
     
-    def create_cursor(self):
+    def create_session(self):
         if self.connection:
-            cur = self.connection.cursor()
-            self.cursor = cur
+            Session = sessionmaker(self.connection)
+            session = Session()
+            self.session = session
+            return self.session
     
     def close_connection(self):
-        if self.cursor:
-            self.cursor.close()
+        if self.session:
+            self.session.close()
         if self.connection:
-            self.connection.close()
-    
-    def fetch_borders(self):
-        if self.cursor:
-            self.cursor.execute("""
-    SELECT jsonb_build_object(
-    'type',     'FeatureCollection',
-    'features', jsonb_agg(features.feature)
-    )
-    FROM (
-	  SELECT jsonb_build_object(
-		'type',       'Feature',
-		'id',         id,
-		'geometry',   ST_AsGeoJSON(geom)::jsonb,
-		'properties', to_jsonb(inputs) - 'id' - 'geom'
-	  ) AS feature
-	  FROM (SELECT id, geom, name, admin_lvl FROM "Komi_district_borders") 
-	inputs) 
-	features
-        """)
-    
-            
-            return self.cursor.fetchone()
+            self.connection.dispose()
